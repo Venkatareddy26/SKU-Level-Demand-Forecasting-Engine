@@ -147,7 +147,7 @@ MIT License - Free for commercial use. See [LICENSE](LICENSE) for details.
 
 ## 📞 Contact
 
-- **Email**: venkatareddy26@example.com
+- **Email**: thor47222@gmail.com
 - **GitHub**: [@Venkatareddy26](https://github.com/Venkatareddy26)
 - **Project**: [SKU-Level-Demand-Forecasting-Engine](https://github.com/Venkatareddy26/SKU-Level-Demand-Forecasting-Engine)
 
