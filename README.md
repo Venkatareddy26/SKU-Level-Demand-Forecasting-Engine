@@ -89,14 +89,25 @@ Then upload `data/sample_sales.csv` in the dashboard and generate your first for
 - **Data**: Pandas 2.0.3, NumPy 1.24.3
 - **Dataset**: M5 Forecasting (Walmart benchmark)
 
-## 📚 Documentation
+## 📖 How to Use
 
-- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Detailed walkthrough
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Installation & configuration
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Production deployment
-- **[COMMERCIAL_PITCH.md](COMMERCIAL_PITCH.md)** - Business case & pricing
-- **[API_SPEC.md](API_SPEC.md)** - Future API design
-- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Cheat sheet
+1. **Install dependencies**: `pip install -r requirements.txt`
+2. **Generate sample data**: `python scripts/generate_sample_data.py`
+3. **Launch dashboard**: `streamlit run app.py`
+4. **Upload CSV**: Use `data/sample_sales.csv` or your own data
+5. **Select SKU**: Choose from dropdown
+6. **Generate forecast**: Click button to see 8-week prediction
+7. **Analyze drivers**: View top 5 demand drivers with SHAP
+
+### CSV Format Required
+```csv
+id,date,sales
+SKU_001,2024-01-01,120
+SKU_001,2024-01-02,135
+```
+
+**Required columns**: `id`, `date`, `sales`  
+**Optional columns**: `category`, `price`, `store_id`
 
 ## 🧪 Testing
 
@@ -122,8 +133,6 @@ python -m unittest tests.test_features
 
 ### TAM
 ₹75 crore ARR at 0.1% market penetration
-
-See [COMMERCIAL_PITCH.md](COMMERCIAL_PITCH.md) for full business case.
 
 ## 🗺 Roadmap
 
@@ -160,4 +169,4 @@ MIT License - Free for commercial use. See [LICENSE](LICENSE) for details.
 
 ---
 
-**Built with ❤️ for Indian retail** | Version 1.0.0
+**Built with ❤️ for Indian retail**
