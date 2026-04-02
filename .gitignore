@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+data/raw/
+data/processed/*.pkl
+models/*.pkl
+*.csv
+!data/festival_calendar.csv
+.env
+.streamlit/
+*.log
+.DS_Store
