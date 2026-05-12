@@ -5,12 +5,16 @@ __pycache__/
 .Python
 env/
 venv/
+venv311/
 data/raw/
 data/processed/*.pkl
 models/*.pkl
 *.csv
 !data/festival_calendar.csv
+!data/sample_sales.csv
 .env
 .streamlit/
 *.log
 .DS_Store
+*.h5
+*.pkl
