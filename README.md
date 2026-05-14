@@ -90,28 +90,42 @@ streamlit run app.py
 5. Switch to "Drivers" tab → Click "Analyze Drivers"
 6. See top 5 demand drivers with explanations
 
-## 📁 Project Structure
+## 📁 Project Structure & Code Statistics
 
 ```
-├── app.py                    # Streamlit dashboard (recursive forecasting)
-├── quickstart.py             # Automated setup
-├── src/                      # Core source code
-│   ├── features.py          # Feature engineering (vectorized, no leakage)
-│   ├── models.py            # LightGBM & NeuralProphet
-│   ├── explainer.py         # SHAP explainability (price-aware)
-│   ├── metrics.py           # WRMSSE, MAPE, MAE, RMSE
-│   └── train.py             # Training pipeline (temporal split)
-├── data/                     # Data files
-│   ├── festival_calendar.csv # 97 festival dates (12 festivals, 2019-2026)
-│   └── sample_sales.csv     # Generated sample data (20 SKUs)
-├── scripts/                  # Utility scripts
-│   ├── download_data.py     # M5 dataset downloader
-│   └── generate_sample_data.py  # Sample data generator
-├── tests/                    # Unit tests
-│   ├── test_features.py     # Feature engineering + leakage tests
-│   └── test_metrics.py      # Metrics tests
-└── models/                   # Trained model persistence
+📦 SKU-Level Demand Forecasting Engine (1,888 lines of Python)
+│
+├── 📊 app.py (502 lines)                    # Streamlit dashboard with recursive forecasting
+├── 🚀 quickstart.py (133 lines)             # Automated setup & dependency installer
+│
+├── 📂 src/ (819 lines)                      # Core forecasting engine
+│   ├── features.py (132 lines)              # 60+ feature engineering (vectorized)
+│   ├── models.py (192 lines)                # LightGBM + NeuralProphet dual models
+│   ├── explainer.py (184 lines)             # SHAP explainability with retail logic
+│   ├── metrics.py (133 lines)               # WRMSSE, MAPE, MAE, RMSE
+│   └── train.py (178 lines)                 # End-to-end training pipeline
+│
+├── 📂 data/                                 # Festival calendar & sample data
+│   ├── festival_calendar.csv (97 dates)     # 12 Indian festivals (2019-2026)
+│   └── sample_sales.csv (generated)         # 20 SKUs × 2 years
+│
+├── 📂 scripts/ (183 lines)                  # Data utilities
+│   ├── download_data.py (48 lines)          # M5 Kaggle downloader
+│   └── generate_sample_data.py (135 lines)  # Synthetic data with festival spikes
+│
+└── 📂 tests/ (231 lines)                    # Unit tests
+    ├── test_features.py (138 lines)         # Feature engineering tests
+    └── test_metrics.py (93 lines)           # Metrics calculation tests
 ```
+
+### Code Quality Metrics
+- **Total Lines**: 1,888 Python LOC
+- **Test Coverage**: 231 test lines (12% test-to-code ratio)
+- **Largest Module**: app.py (502 lines) - Full-featured dashboard
+- **Core Engine**: 819 lines (features + models + explainer + metrics + train)
+- **Documentation**: Comprehensive docstrings in all modules
+- **Architecture**: Global model (single LightGBM for all SKUs)
+- **Performance**: Vectorized NumPy operations, no nested Python loops
 
 ## 📊 Performance Benchmarks
 
@@ -129,12 +143,34 @@ streamlit run app.py
 | **LightGBM (Global)** | Primary forecaster — one model across all SKUs | < 1 sec inference |
 | **NeuralProphet (Per Category)** | Alternative — Prophet + AR-Net + regressors | 2-3 sec inference |
 
-## 🛠 Tech Stack
+## 🛠 Tech Stack & Implementation Details
 
-- **Models**: LightGBM 4.1.0, NeuralProphet 0.7.0
-- **Explainability**: SHAP 0.44.0
-- **Dashboard**: Streamlit 1.29.0, Plotly 5.18.0
-- **Data**: Pandas 2.0.3, NumPy 1.24.3
+### Core ML Stack
+| Component | Version | Role | Implementation Highlights |
+|-----------|---------|------|---------------------------|
+| **LightGBM** | 4.1.0 | Primary forecaster | Global model (single model for all SKUs), early stopping (50 rounds), feature importance via gain, pickle persistence |
+| **NeuralProphet** | 0.7.0 | Alternative model | Per-category models, Prophet decomposition + AR-Net, festival regressors, lazy import for fast dashboard loading |
+| **SHAP** | 0.44.0 | Explainability | TreeExplainer for LightGBM, per-prediction drivers, retail-aware explanations (price, festivals, lags) |
+
+### Dashboard & Visualization
+| Component | Version | Features |
+|-----------|---------|----------|
+| **Streamlit** | 1.29.0 | Interactive dashboard (502 lines), CSV validation, recursive forecasting, confidence intervals |
+| **Plotly** | 5.18.0 | Interactive charts (actual vs fitted, forecast with CI, SHAP bars) |
+
+### Data Processing
+- **Pandas 2.0.3**: DataFrame operations, temporal sorting
+- **NumPy 1.24.3**: Vectorized festival computation (O(n × k) using broadcasting)
+- **Scikit-learn 1.3.0**: Train/test split, preprocessing
+
+### Architecture Highlights
+1. **Global Model**: Single LightGBM for all SKUs (faster than per-SKU models)
+2. **Recursive Forecasting**: Multi-step ahead with lag feature updates (each prediction feeds back)
+3. **Vectorized Features**: NumPy broadcasting for O(n × k) festival computation (no nested loops)
+4. **Look-Ahead Bias Prevention**: `.shift(1)` on rolling windows (window computed on data BEFORE current row)
+5. **Confidence Intervals**: Residual-based with horizon widening (uncertainty grows as √t)
+6. **Price Intelligence**: Automatic discount detection (price vs 7-day rolling average)
+7. **Temporal Splitting**: Train/test split respects time order (no data leakage)
 
 ## 📖 How to Use
 
