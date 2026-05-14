@@ -2,62 +2,107 @@
 import numpy as np
 import pandas as pd
 
-def calculate_wrmsse(y_true, y_pred, sales_train, weights=None):
+def calculate_rmsse(y_true, y_pred, y_train):
     """
-    Calculate Weighted Root Mean Squared Scaled Error (WRMSSE).
+    Calculate Root Mean Squared Scaled Error for a single series.
+    
+    The scaling denominator is the mean squared successive difference
+    in the training data (naive one-step-ahead baseline).
     
     Args:
-        y_true: Actual values
-        y_pred: Predicted values
-        sales_train: Training data for scaling
-        weights: Optional weights per series
+        y_true: Actual values (test period)
+        y_pred: Predicted values (test period)
+        y_train: Training data for the same series (used for scaling)
     
     Returns:
-        WRMSSE score
+        RMSSE score for the series
     """
-    # Calculate RMSSE per series
-    rmsse_scores = []
+    y_true = np.array(y_true, dtype=np.float64)
+    y_pred = np.array(y_pred, dtype=np.float64)
+    y_train = np.array(y_train, dtype=np.float64)
     
-    if isinstance(y_true, pd.DataFrame):
-        for col in y_true.columns:
-            true_vals = y_true[col].values
-            pred_vals = y_pred[col].values if isinstance(y_pred, pd.DataFrame) else y_pred
-            train_vals = sales_train[col].values if isinstance(sales_train, pd.DataFrame) else sales_train
-            
-            # Calculate MSE
-            mse = np.mean((true_vals - pred_vals) ** 2)
-            
-            # Calculate scaling factor (mean squared difference in training)
-            scale = np.mean(np.diff(train_vals) ** 2)
-            scale = max(scale, 1e-10)  # Avoid division by zero
-            
-            # RMSSE
-            rmsse = np.sqrt(mse / scale)
-            rmsse_scores.append(rmsse)
-    else:
-        # Single series
-        mse = np.mean((y_true - y_pred) ** 2)
-        scale = np.mean(np.diff(sales_train) ** 2)
-        scale = max(scale, 1e-10)
-        rmsse = np.sqrt(mse / scale)
-        rmsse_scores.append(rmsse)
+    # Numerator: MSE of predictions
+    mse = np.mean((y_true - y_pred) ** 2)
     
-    # Apply weights if provided
+    # Denominator: mean squared successive difference in training
+    n = len(y_train)
+    if n < 2:
+        return np.nan
+    scale = np.sum((y_train[1:] - y_train[:-1]) ** 2) / (n - 1)
+    scale = max(scale, 1e-10)  # Avoid division by zero
+    
+    return np.sqrt(mse / scale)
+
+
+def calculate_wrmsse(y_true_dict, y_pred_dict, y_train_dict, weights=None):
+    """
+    Calculate Weighted Root Mean Squared Scaled Error across multiple series.
+    
+    This is a simplified version of the M5 WRMSSE. The full M5 metric uses
+    12-level hierarchical aggregation and revenue-based weights.
+    
+    Args:
+        y_true_dict: Dict of {series_id: actual_values}
+        y_pred_dict: Dict of {series_id: predicted_values}
+        y_train_dict: Dict of {series_id: training_values}
+        weights: Optional dict of {series_id: weight}. 
+                 If None, uses equal weights.
+    
+    Returns:
+        Weighted RMSSE score
+    """
+    series_ids = list(y_true_dict.keys())
+    rmsse_scores = {}
+    
+    for sid in series_ids:
+        rmsse_scores[sid] = calculate_rmsse(
+            y_true_dict[sid], y_pred_dict[sid], y_train_dict[sid]
+        )
+    
+    # Filter out NaN scores
+    valid_ids = [sid for sid in series_ids if not np.isnan(rmsse_scores[sid])]
+    if not valid_ids:
+        return np.nan
+    
     if weights is None:
-        weights = np.ones(len(rmsse_scores))
+        weights = {sid: 1.0 / len(valid_ids) for sid in valid_ids}
     
-    weights = np.array(weights) / np.sum(weights)
-    wrmsse = np.sum(np.array(rmsse_scores) * weights)
+    # Normalize weights
+    total_weight = sum(weights[sid] for sid in valid_ids)
+    wrmsse = sum(rmsse_scores[sid] * weights[sid] / total_weight for sid in valid_ids)
     
     return wrmsse
 
+
+def calculate_wrmsse_simple(y_true, y_pred, y_train):
+    """
+    Simplified WRMSSE for a single flattened series.
+    
+    Convenience wrapper when you just have arrays (not per-series dicts).
+    
+    Args:
+        y_true: Actual values (array)
+        y_pred: Predicted values (array)
+        y_train: Training values for scaling (array)
+    
+    Returns:
+        RMSSE score
+    """
+    return calculate_rmsse(y_true, y_pred, y_train)
+
+
 def calculate_mape(y_true, y_pred):
-    """Calculate Mean Absolute Percentage Error."""
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
+    """Calculate Mean Absolute Percentage Error.
+    
+    Skips zero-actual values to avoid division by zero.
+    """
+    y_true = np.array(y_true, dtype=np.float64)
+    y_pred = np.array(y_pred, dtype=np.float64)
     
     # Avoid division by zero
     mask = y_true != 0
+    if not np.any(mask):
+        return np.nan
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
 def calculate_mae(y_true, y_pred):
@@ -68,14 +113,14 @@ def calculate_rmse(y_true, y_pred):
     """Calculate Root Mean Squared Error."""
     return np.sqrt(np.mean((np.array(y_true) - np.array(y_pred)) ** 2))
 
-def evaluate_forecast(y_true, y_pred, sales_train=None, metric='all'):
+def evaluate_forecast(y_true, y_pred, y_train=None, metric='all'):
     """
     Evaluate forecast with multiple metrics.
     
     Args:
         y_true: Actual values
         y_pred: Predicted values
-        sales_train: Training data (required for WRMSSE)
+        y_train: Training data (required for WRMSSE/RMSSE)
         metric: 'all', 'wrmsse', 'mape', 'mae', or 'rmse'
     
     Returns:
@@ -92,7 +137,7 @@ def evaluate_forecast(y_true, y_pred, sales_train=None, metric='all'):
     if metric in ['all', 'mape']:
         results['MAPE'] = calculate_mape(y_true, y_pred)
     
-    if metric in ['all', 'wrmsse'] and sales_train is not None:
-        results['WRMSSE'] = calculate_wrmsse(y_true, y_pred, sales_train)
+    if metric in ['all', 'wrmsse'] and y_train is not None:
+        results['WRMSSE'] = calculate_wrmsse_simple(y_true, y_pred, y_train)
     
     return results

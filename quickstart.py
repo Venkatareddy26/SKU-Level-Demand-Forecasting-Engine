@@ -61,7 +61,7 @@ def train_model():
     """Train the forecasting model."""
     print_header("Training Model")
     
-    response = input("Train model now? This may take 5-30 minutes. (y/n): ")
+    response = input("Train model now? (y/n): ")
     
     if response.lower() == 'y':
         try:
@@ -109,12 +109,14 @@ def main():
     # Check M5 data
     has_m5_data = check_m5_data()
     
-    # Train model (optional)
+    # Train model (works with either M5 or sample data)
+    print_header("Model Training")
+    print("The model can train on:")
     if has_m5_data:
-        train_model()
-    else:
-        print("\n⚠ Skipping model training (no M5 data)")
-        print("  You can still use the dashboard with sample data")
+        print("  ✓ M5 dataset (42,840 SKUs — 2-3 hours)")
+    print("  ✓ Sample data (20 SKUs — ~5 minutes)")
+    print()
+    train_model()
     
     # Launch dashboard
     print_header("Setup Complete!")
@@ -122,6 +124,10 @@ def main():
     print("✓ Sample data generated")
     if has_m5_data:
         print("✓ M5 dataset available")
+    if os.path.exists("models/lightgbm_model.pkl"):
+        print("✓ Model trained")
+    else:
+        print("⚠ Model not yet trained (run: python src/train.py)")
     
     print("\nNext steps:")
     print("1. Launch dashboard: streamlit run app.py")

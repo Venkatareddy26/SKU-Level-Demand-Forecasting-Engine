@@ -44,8 +44,173 @@ def load_model():
         model.load("models/lightgbm_model.pkl")
         return model
     except Exception as e:
-        st.error(f"Error loading model: {e}")
         return None
+
+
+def validate_csv(df):
+    """Validate uploaded CSV has required columns and proper data types.
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    required_cols = ['id', 'date', 'sales']
+    
+    # Check required columns
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        return False, f"Missing required columns: {missing}. Expected: id, date, sales"
+    
+    # Validate date parsing
+    try:
+        pd.to_datetime(df['date'])
+    except Exception:
+        return False, "Cannot parse 'date' column. Use YYYY-MM-DD format."
+    
+    # Validate sales is numeric
+    if not pd.api.types.is_numeric_dtype(df['sales']):
+        try:
+            df['sales'] = pd.to_numeric(df['sales'])
+        except Exception:
+            return False, "'sales' column must be numeric."
+    
+    # Check for minimum data
+    if len(df) < 30:
+        return False, f"Need at least 30 rows of data, got {len(df)}."
+    
+    # Check per-SKU minimum
+    sku_counts = df['id'].value_counts()
+    small_skus = sku_counts[sku_counts < 30]
+    if len(small_skus) > 0:
+        return True, f"Warning: {len(small_skus)} SKUs have <30 data points. Forecasts may be unreliable."
+    
+    return True, ""
+
+
+def recursive_forecast(model, fe, sku_data, feature_cols, forecast_days):
+    """Generate multi-step recursive forecast.
+    
+    Each step predicts one day ahead, then feeds that prediction back
+    as the lag feature for the next step. Calendar and festival features
+    are computed from the future date.
+    
+    Args:
+        model: Trained LightGBMForecaster
+        fe: FeatureEngineer instance
+        sku_data: Historical data for one SKU
+        feature_cols: List of feature column names
+        forecast_days: Number of days to forecast
+    
+    Returns:
+        DataFrame with date and forecast columns
+    """
+    # Build features on historical data
+    sku_features = fe.build_features(sku_data.copy(), target_col='sales', date_col='date')
+    sku_features = sku_features.dropna()
+    
+    if len(sku_features) == 0:
+        return pd.DataFrame(), sku_features
+    
+    # Get historical predictions for display
+    hist_predictions = model.predict(sku_features[feature_cols])
+    hist_df = sku_features[['date', 'sales']].copy()
+    hist_df['forecast'] = hist_predictions
+    
+    # Prepare for recursive forecasting
+    last_date = sku_data['date'].max()
+    future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=forecast_days, freq='D')
+    
+    # Build a rolling history that we'll extend with predictions
+    history = sku_data[['id', 'date', 'sales']].copy()
+    if 'price' in sku_data.columns:
+        history['price'] = sku_data['price']
+    if 'category' in sku_data.columns:
+        history['category'] = sku_data['category']
+    
+    future_preds = []
+    sku_id = sku_data['id'].iloc[0]
+    last_price = sku_data['price'].iloc[-1] if 'price' in sku_data.columns else None
+    category = sku_data['category'].iloc[-1] if 'category' in sku_data.columns else None
+    
+    for future_date in future_dates:
+        # Create a new row with the future date and placeholder sales
+        new_row = {'id': sku_id, 'date': future_date, 'sales': 0}
+        if last_price is not None:
+            new_row['price'] = last_price
+        if category is not None:
+            new_row['category'] = category
+        
+        # Append to history
+        new_row_df = pd.DataFrame([new_row])
+        history = pd.concat([history, new_row_df], ignore_index=True)
+        
+        # Re-build features on the extended history
+        temp_features = fe.build_features(history.copy(), target_col='sales', date_col='date')
+        
+        # Get features for the last row (the future date)
+        last_row_features = temp_features.iloc[-1:]
+        
+        # Check if all required features are present
+        missing_feats = [f for f in feature_cols if f not in last_row_features.columns]
+        if missing_feats:
+            break
+        
+        # Predict
+        try:
+            pred = model.predict(last_row_features[feature_cols])[0]
+            pred = max(0, pred)  # Ensure non-negative
+        except Exception:
+            pred = future_preds[-1] if future_preds else hist_df['sales'].tail(7).mean()
+        
+        future_preds.append(pred)
+        
+        # Update the sales value in history so next iteration's lags use it
+        history.iloc[-1, history.columns.get_loc('sales')] = pred
+    
+    future_df = pd.DataFrame({
+        'date': future_dates[:len(future_preds)],
+        'forecast': future_preds
+    })
+    
+    return future_df, hist_df
+
+
+def compute_confidence_bands(future_df, hist_df, confidence=0.80):
+    """Compute prediction intervals based on historical residual spread.
+    
+    Uses the standard deviation of historical residuals to build
+    intervals that widen over the forecast horizon.
+    
+    Args:
+        future_df: DataFrame with forecast column
+        hist_df: DataFrame with sales and forecast columns
+        confidence: Confidence level (default 80%)
+    
+    Returns:
+        future_df with upper and lower bound columns added
+    """
+    if len(hist_df) > 0 and 'forecast' in hist_df.columns:
+        residuals = hist_df['sales'] - hist_df['forecast']
+        residual_std = residuals.std()
+    else:
+        residual_std = future_df['forecast'].mean() * 0.2  # Fallback
+    
+    # Z-score for confidence level
+    from scipy import stats
+    try:
+        z = stats.norm.ppf(1 - (1 - confidence) / 2)
+    except ImportError:
+        z = 1.28  # Approx for 80% confidence
+    
+    # Widen intervals over the forecast horizon
+    steps = np.arange(1, len(future_df) + 1)
+    widening = np.sqrt(steps)  # Uncertainty grows with sqrt of horizon
+    
+    future_df = future_df.copy()
+    future_df['upper'] = future_df['forecast'] + z * residual_std * widening
+    future_df['lower'] = (future_df['forecast'] - z * residual_std * widening).clip(lower=0)
+    
+    return future_df
+
 
 # File upload
 uploaded_file = st.sidebar.file_uploader(
@@ -65,15 +230,26 @@ forecast_weeks = st.sidebar.slider(
 if uploaded_file is not None:
     # Load data
     df = pd.read_csv(uploaded_file)
-    st.session_state.data = df
     
-    st.sidebar.success(f"✓ Data loaded: {len(df)} rows")
+    # Validate
+    is_valid, message = validate_csv(df)
+    
+    if not is_valid:
+        st.sidebar.error(f"❌ {message}")
+        st.stop()
+    else:
+        st.session_state.data = df
+        st.sidebar.success(f"✓ Data loaded: {len(df)} rows")
+        if message:
+            st.sidebar.warning(message)
     
     # Display data info
     with st.expander("📋 Data Preview"):
         st.dataframe(df.head(10))
         st.write(f"Shape: {df.shape}")
-        st.write(f"Date range: {df['date'].min()} to {df['date'].max()}")
+        df['date'] = pd.to_datetime(df['date'])
+        st.write(f"Date range: {df['date'].min().date()} to {df['date'].max().date()}")
+        st.write(f"SKUs: {df['id'].nunique()}")
 
 # Main content
 if st.session_state.data is not None:
@@ -103,67 +279,43 @@ if st.session_state.data is not None:
                         model = load_model()
                         
                         if model is None:
-                            st.error("Model not found. Please train the model first.")
+                            st.error("Model not found. Please train the model first: `python src/train.py`")
                         else:
                             # Feature engineering
                             fe = FeatureEngineer()
-                            sku_features = fe.build_features(sku_data, target_col='sales', date_col='date')
+                            feature_cols = model.feature_cols
                             
-                            # Get feature columns
-                            feature_cols = [col for col in sku_features.columns if col not in 
-                                          ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 
-                                           'state_id', 'date', 'sales', 'd', 'wm_yr_wk', 'festival_name']]
+                            # Recursive forecasting
+                            forecast_days = forecast_weeks * 7
+                            future_df, hist_df = recursive_forecast(
+                                model, fe, sku_data, feature_cols, forecast_days
+                            )
                             
-                            # Make predictions on historical data
-                            sku_features_clean = sku_features.dropna()
-                            if len(sku_features_clean) > 0:
-                                predictions = model.predict(sku_features_clean[feature_cols])
-                                
-                                # Create forecast dataframe
-                                forecast_df = sku_features_clean[['date', 'sales']].copy()
-                                forecast_df['forecast'] = predictions
-                                
-                                # Generate future dates
-                                last_date = forecast_df['date'].max()
-                                future_dates = pd.date_range(
-                                    start=last_date + timedelta(days=1),
-                                    periods=forecast_weeks * 7,
-                                    freq='D'
-                                )
-                                
-                                # Simple future forecast (using last known features)
-                                # In production, this would use proper recursive forecasting
-                                last_features = sku_features_clean[feature_cols].iloc[-1:].copy()
-                                future_preds = []
-                                
-                                for i in range(len(future_dates)):
-                                    pred = model.predict(last_features)[0]
-                                    future_preds.append(max(0, pred))  # Ensure non-negative
-                                
-                                future_df = pd.DataFrame({
-                                    'date': future_dates,
-                                    'forecast': future_preds
-                                })
+                            if len(future_df) == 0:
+                                st.warning("Not enough data for forecasting after feature engineering.")
+                            else:
+                                # Compute proper confidence bands
+                                future_df = compute_confidence_bands(future_df, hist_df)
                                 
                                 # Plot
                                 fig = go.Figure()
                                 
-                                # Historical actual
+                                # Historical actual (last 90 days)
                                 fig.add_trace(go.Scatter(
-                                    x=forecast_df['date'].tail(90),
-                                    y=forecast_df['sales'].tail(90),
+                                    x=hist_df['date'].tail(90),
+                                    y=hist_df['sales'].tail(90),
                                     mode='lines',
                                     name='Actual',
-                                    line=dict(color='blue', width=2)
+                                    line=dict(color='#3b82f6', width=2)
                                 ))
                                 
-                                # Historical forecast
+                                # Historical forecast (last 90 days)
                                 fig.add_trace(go.Scatter(
-                                    x=forecast_df['date'].tail(90),
-                                    y=forecast_df['forecast'].tail(90),
+                                    x=hist_df['date'].tail(90),
+                                    y=hist_df['forecast'].tail(90),
                                     mode='lines',
                                     name='Fitted',
-                                    line=dict(color='green', width=2, dash='dot')
+                                    line=dict(color='#22c55e', width=2, dash='dot')
                                 ))
                                 
                                 # Future forecast
@@ -172,55 +324,66 @@ if st.session_state.data is not None:
                                     y=future_df['forecast'],
                                     mode='lines',
                                     name='Forecast',
-                                    line=dict(color='red', width=2)
+                                    line=dict(color='#ef4444', width=2.5)
                                 ))
                                 
-                                # Add confidence band (simple ±20%)
+                                # Confidence band (upper)
                                 fig.add_trace(go.Scatter(
                                     x=future_df['date'],
-                                    y=future_df['forecast'] * 1.2,
+                                    y=future_df['upper'],
                                     mode='lines',
-                                    name='Upper Bound',
+                                    name='80% CI Upper',
                                     line=dict(width=0),
                                     showlegend=False
                                 ))
                                 
+                                # Confidence band (lower + fill)
                                 fig.add_trace(go.Scatter(
                                     x=future_df['date'],
-                                    y=future_df['forecast'] * 0.8,
+                                    y=future_df['lower'],
                                     mode='lines',
-                                    name='Lower Bound',
+                                    name='80% CI',
                                     fill='tonexty',
-                                    fillcolor='rgba(255,0,0,0.2)',
+                                    fillcolor='rgba(239,68,68,0.15)',
                                     line=dict(width=0),
-                                    showlegend=False
                                 ))
                                 
                                 fig.update_layout(
-                                    title=f"Demand Forecast - {forecast_weeks} Weeks",
+                                    title=f"Demand Forecast — {forecast_weeks} Weeks",
                                     xaxis_title="Date",
                                     yaxis_title="Sales Units",
                                     hovermode='x unified',
-                                    height=500
+                                    height=500,
+                                    legend=dict(orientation='h', yanchor='bottom', y=1.02)
                                 )
                                 
                                 st.plotly_chart(fig, use_container_width=True)
                                 
                                 # Forecast summary
-                                col1, col2, col3 = st.columns(3)
+                                col1, col2, col3, col4 = st.columns(4)
                                 
+                                avg_daily = future_df['forecast'].mean()
                                 with col1:
-                                    avg_forecast = future_df['forecast'].mean()
-                                    st.metric("Avg Weekly Demand", f"{avg_forecast * 7:.0f} units")
+                                    st.metric("Avg Daily Demand", f"{avg_daily:.0f} units")
                                 
                                 with col2:
                                     total_forecast = future_df['forecast'].sum()
-                                    st.metric(f"Total {forecast_weeks}-Week Demand", f"{total_forecast:.0f} units")
+                                    st.metric(f"Total {forecast_weeks}-Week", f"{total_forecast:.0f} units")
                                 
                                 with col3:
-                                    # Reorder point (simple: 2 weeks of avg demand)
-                                    reorder_point = avg_forecast * 14
-                                    st.metric("Suggested Reorder Point", f"{reorder_point:.0f} units")
+                                    # Reorder point: avg daily × lead time (14 days) + safety stock
+                                    safety_stock = future_df['forecast'].std() * 1.28  # 80% service level
+                                    reorder_point = avg_daily * 14 + safety_stock
+                                    st.metric("Reorder Point", f"{reorder_point:.0f} units")
+                                
+                                with col4:
+                                    # Compare to historical average
+                                    hist_avg = sku_data['sales'].tail(forecast_days).mean()
+                                    if hist_avg > 0:
+                                        change_pct = ((avg_daily - hist_avg) / hist_avg) * 100
+                                        st.metric("vs Historical", f"{change_pct:+.1f}%")
+                                    else:
+                                        st.metric("vs Historical", "N/A")
                                 
                                 # Download forecast
                                 csv = future_df.to_csv(index=False)
@@ -230,8 +393,6 @@ if st.session_state.data is not None:
                                     f"forecast_{selected_sku}.csv",
                                     "text/csv"
                                 )
-                            else:
-                                st.warning("Not enough data for forecasting after feature engineering.")
                     
                     except Exception as e:
                         st.error(f"Error generating forecast: {e}")
@@ -245,15 +406,15 @@ if st.session_state.data is not None:
                     try:
                         model = load_model()
                         
-                        if model:
+                        if model is None:
+                            st.error("Model not found. Train with: `python src/train.py`")
+                        else:
                             # Feature engineering
                             fe = FeatureEngineer()
                             sku_features = fe.build_features(sku_data, target_col='sales', date_col='date')
                             sku_features_clean = sku_features.dropna()
                             
-                            feature_cols = [col for col in sku_features.columns if col not in 
-                                          ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 
-                                           'state_id', 'date', 'sales', 'd', 'wm_yr_wk', 'festival_name']]
+                            feature_cols = model.feature_cols
                             
                             # Create explainer
                             explainer = DemandExplainer(model, feature_cols)
@@ -278,13 +439,16 @@ if st.session_state.data is not None:
                                 x='importance',
                                 y='feature',
                                 orientation='h',
-                                title="Top 15 Features by SHAP Importance"
+                                title="Top 15 Features by SHAP Importance",
+                                color='importance',
+                                color_continuous_scale='RdYlGn'
                             )
-                            fig.update_layout(height=500)
+                            fig.update_layout(height=500, showlegend=False)
                             st.plotly_chart(fig, use_container_width=True)
                     
                     except Exception as e:
                         st.error(f"Error analyzing drivers: {e}")
+                        st.exception(e)
         
         with tab3:
             st.subheader("📊 Historical Analytics")
@@ -294,8 +458,9 @@ if st.session_state.data is not None:
                 sku_data,
                 x='date',
                 y='sales',
-                title=f"Sales Trend - {selected_sku}"
+                title=f"Sales Trend — {selected_sku}"
             )
+            fig.update_traces(line_color='#3b82f6')
             st.plotly_chart(fig, use_container_width=True)
             
             # Statistics
@@ -321,10 +486,10 @@ else:
     st.markdown("""
     ### Features
     - 📈 4-8 week SKU-level demand forecasting
-    - 🎯 LightGBM & NeuralProphet models
-    - 🎊 Indian festival calendar integration
-    - 🔍 SHAP-based explainable drivers
-    - 📊 Interactive visualizations
+    - 🎯 LightGBM global model with recursive multi-step prediction
+    - 🎊 Indian festival calendar integration (97 festival dates, 12 festivals)
+    - 🔍 SHAP-based explainable demand drivers
+    - 📊 Interactive visualizations with confidence intervals
     
     ### Required CSV Format
     Your CSV should contain at least these columns:
@@ -332,17 +497,16 @@ else:
     - `date`: Date (YYYY-MM-DD format)
     - `sales`: Sales quantity
     
-    ### Model Performance
-    - Target WRMSSE: < 0.60
-    - Trained on M5 Forecasting benchmark
-    - Festival-aware predictions
+    **Optional columns**: `category`, `price`
     """)
     
     # Show sample data format
     sample_data = pd.DataFrame({
         'id': ['SKU_001', 'SKU_001', 'SKU_001'],
         'date': ['2024-01-01', '2024-01-02', '2024-01-03'],
-        'sales': [120, 135, 128]
+        'sales': [120, 135, 128],
+        'category': ['Food', 'Food', 'Food'],
+        'price': [99.50, 99.50, 94.75]
     })
     
     st.markdown("### Sample Data Format")
@@ -354,8 +518,6 @@ st.sidebar.markdown("### About")
 st.sidebar.info("""
 **SKU Demand Forecasting Engine**
 
-Industry-grade MVP for FMCG distributors, 
-kirana aggregators, and D2C brands.
-
-Target: ₹75 crore ARR at 0.1% penetration
+AI-powered demand forecasting for Indian retail 
+with festival intelligence and explainable drivers.
 """)

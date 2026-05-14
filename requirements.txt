@@ -1,3 +1,4 @@
+scipy>=1.10.0
 neuralprophet==0.7.0
 lightgbm==4.1.0
 pandas==2.0.3

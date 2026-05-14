@@ -2,7 +2,6 @@
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
-from neuralprophet import NeuralProphet
 import pickle
 from datetime import datetime, timedelta
 
@@ -86,22 +85,52 @@ class LightGBMForecaster:
 
 
 class NeuralProphetForecaster:
-    """NeuralProphet model with festival regressors."""
+    """NeuralProphet model with festival regressors.
+    
+    NOTE: NeuralProphet is imported lazily to avoid slow import times
+    when only LightGBM is needed (e.g. in the dashboard).
+    """
     
     def __init__(self, growth='linear', seasonality_mode='multiplicative'):
         self.models = {}  # One model per category
         self.growth = growth
         self.seasonality_mode = seasonality_mode
     
-    def prepare_data(self, df, date_col='date', target_col='sales', id_col='id'):
-        """Prepare data in NeuralProphet format (ds, y)."""
+    def prepare_data(self, df, festival_df=None, date_col='date', target_col='sales', id_col='id'):
+        """Prepare data in NeuralProphet format (ds, y).
+        
+        Preserves festival features as external regressors.
+        
+        Args:
+            df: Source DataFrame
+            festival_df: Optional festival calendar DataFrame
+            date_col: Date column name
+            target_col: Target column name
+            id_col: ID column name
+        
+        Returns:
+            DataFrame with ds, y, ID and regressor columns
+        """
         df_prophet = df[[date_col, target_col, id_col]].copy()
         df_prophet.columns = ['ds', 'y', 'ID']
         df_prophet['ds'] = pd.to_datetime(df_prophet['ds'])
+        
+        # Add festival features as regressors if available
+        if festival_df is not None:
+            festival_dates = set(pd.to_datetime(festival_df['date']).dt.date)
+            df_prophet['is_festival'] = df_prophet['ds'].dt.date.isin(festival_dates).astype(int)
+        elif 'is_festival' in df.columns:
+            df_prophet['is_festival'] = df['is_festival'].values
+        
+        if 'is_festival_week' in df.columns:
+            df_prophet['is_festival_week'] = df['is_festival_week'].values
+        
         return df_prophet
     
-    def train(self, df, category_col='category', epochs=50):
+    def train(self, df, category_col='category', festival_df=None, epochs=50):
         """Train one NeuralProphet model per category."""
+        from neuralprophet import NeuralProphet
+        
         print("Training NeuralProphet models...")
         
         categories = df[category_col].unique()
@@ -111,7 +140,7 @@ class NeuralProphetForecaster:
             
             # Filter data for this category
             cat_data = df[df[category_col] == category].copy()
-            cat_data = self.prepare_data(cat_data)
+            cat_data = self.prepare_data(cat_data, festival_df=festival_df)
             
             # Initialize model
             model = NeuralProphet(
@@ -123,10 +152,11 @@ class NeuralProphetForecaster:
                 epochs=epochs
             )
             
-            # Add festival regressor if available
-            if 'is_festival' in df.columns:
-                cat_data['is_festival'] = df[df[category_col] == category]['is_festival'].values
+            # Add festival regressors if present
+            if 'is_festival' in cat_data.columns:
                 model.add_future_regressor('is_festival')
+            if 'is_festival_week' in cat_data.columns:
+                model.add_future_regressor('is_festival_week')
             
             # Train model
             metrics = model.fit(cat_data, freq='D')

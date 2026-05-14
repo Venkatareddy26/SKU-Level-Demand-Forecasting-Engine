@@ -1,7 +1,6 @@
 """Training pipeline for demand forecasting models."""
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
 import sys
 import os
 
@@ -49,8 +48,29 @@ def load_m5_data(data_path="data/raw"):
     print(f"✓ Data loaded. Shape: {sales_long.shape}")
     return sales_long
 
-def train_lightgbm_model(df, test_size=0.2):
-    """Train LightGBM model with full pipeline."""
+
+def load_sample_data(data_path="data/sample_sales.csv"):
+    """Load sample sales data for training."""
+    print("Loading sample sales data...")
+    df = pd.read_csv(data_path)
+    df['date'] = pd.to_datetime(df['date'])
+    print(f"✓ Sample data loaded. Shape: {df.shape}")
+    return df
+
+
+def train_lightgbm_model(df, test_days=60):
+    """Train LightGBM model with temporal train/test split.
+    
+    Uses the last `test_days` days as validation (no random splitting)
+    to prevent data leakage in time-series forecasting.
+    
+    Args:
+        df: DataFrame with columns [id, date, sales, ...]
+        test_days: Number of days to hold out for validation
+    
+    Returns:
+        Tuple of (model, explainer, val_metrics)
+    """
     print("\n" + "="*50)
     print("TRAINING LIGHTGBM MODEL")
     print("="*50)
@@ -62,22 +82,31 @@ def train_lightgbm_model(df, test_size=0.2):
     # Remove rows with NaN (from lag features)
     df_features = df_features.dropna()
     
-    # Define feature columns
-    feature_cols = [col for col in df_features.columns if col not in 
-                   ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id', 
-                    'date', 'sales', 'd', 'wm_yr_wk', 'festival_name']]
+    # Define feature columns (exclude identifiers, target, and non-numeric)
+    exclude_cols = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id',
+                    'date', 'sales', 'd', 'wm_yr_wk', 'festival_name', 'category']
+    feature_cols = [col for col in df_features.columns if col not in exclude_cols]
     
-    print(f"\nFeature columns ({len(feature_cols)}): {feature_cols[:10]}...")
+    print(f"\nFeature columns ({len(feature_cols)}): {feature_cols}")
     
-    # Split data
-    train_df, val_df = train_test_split(df_features, test_size=test_size, random_state=42)
+    # TEMPORAL SPLIT — use last N days as validation (no data leakage)
+    df_features = df_features.sort_values('date')
+    cutoff_date = df_features['date'].max() - pd.Timedelta(days=test_days)
+    
+    train_df = df_features[df_features['date'] <= cutoff_date]
+    val_df = df_features[df_features['date'] > cutoff_date]
     
     X_train = train_df[feature_cols]
     y_train = train_df['sales']
     X_val = val_df[feature_cols]
     y_val = val_df['sales']
     
-    print(f"\nTrain size: {len(X_train)}, Val size: {len(X_val)}")
+    # Store training target for WRMSSE computation
+    y_train_array = y_train.values
+    
+    print(f"\nTemporal split:")
+    print(f"  Train: {train_df['date'].min().date()} to {train_df['date'].max().date()} ({len(X_train)} rows)")
+    print(f"  Val:   {val_df['date'].min().date()} to {val_df['date'].max().date()} ({len(X_val)} rows)")
     
     # Train model
     model = LightGBMForecaster()
@@ -87,8 +116,8 @@ def train_lightgbm_model(df, test_size=0.2):
     y_pred_train = model.predict(X_train)
     y_pred_val = model.predict(X_val)
     
-    train_metrics = evaluate_forecast(y_train, y_pred_train, metric='all')
-    val_metrics = evaluate_forecast(y_val, y_pred_val, metric='all')
+    train_metrics = evaluate_forecast(y_train, y_pred_train, y_train=y_train_array, metric='all')
+    val_metrics = evaluate_forecast(y_val, y_pred_val, y_train=y_train_array, metric='all')
     
     print("\n" + "="*50)
     print("EVALUATION RESULTS")
@@ -126,19 +155,23 @@ def train_lightgbm_model(df, test_size=0.2):
 
 if __name__ == "__main__":
     # Check if M5 data exists
-    if not os.path.exists("data/raw/sales_train_validation.csv"):
-        print("❌ M5 dataset not found!")
-        print("Run: python scripts/download_data.py")
+    if os.path.exists("data/raw/sales_train_validation.csv"):
+        print("Found M5 dataset. Training on M5 data...")
+        df = load_m5_data()
+        
+        # Sample data for faster training (remove for full training)
+        print("\nSampling data for faster training...")
+        sample_ids = df['id'].unique()[:100]  # First 100 SKUs
+        df = df[df['id'].isin(sample_ids)]
+        print(f"Sampled data shape: {df.shape}")
+    elif os.path.exists("data/sample_sales.csv"):
+        print("M5 dataset not found. Using sample data...")
+        df = load_sample_data()
+    else:
+        print("❌ No data found!")
+        print("Run: python scripts/generate_sample_data.py")
+        print("Or:  python scripts/download_data.py")
         sys.exit(1)
-    
-    # Load data (sample for faster training)
-    df = load_m5_data()
-    
-    # Sample data for faster training (remove for full training)
-    print("\nSampling data for faster training...")
-    sample_ids = df['id'].unique()[:100]  # First 100 SKUs
-    df = df[df['id'].isin(sample_ids)]
-    print(f"Sampled data shape: {df.shape}")
     
     # Train model
     model, explainer, metrics = train_lightgbm_model(df)
@@ -148,4 +181,6 @@ if __name__ == "__main__":
     print("="*50)
     print(f"\nValidation RMSE: {metrics['RMSE']:.2f}")
     print(f"Validation MAPE: {metrics['MAPE']:.2f}%")
+    if 'WRMSSE' in metrics:
+        print(f"Validation WRMSSE: {metrics['WRMSSE']:.4f}")
     print("\nModel saved to: models/lightgbm_model.pkl")

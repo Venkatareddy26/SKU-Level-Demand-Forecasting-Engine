@@ -45,7 +45,11 @@ class DemandExplainer:
             X_row = X_row.to_frame().T
         
         # Get SHAP values for this row
-        shap_vals = self.explainer.shap_values(X_row[self.feature_names])[0]
+        shap_vals = self.explainer.shap_values(X_row[self.feature_names])
+        if isinstance(shap_vals, list):
+            shap_vals = shap_vals[0]
+        if shap_vals.ndim > 1:
+            shap_vals = shap_vals[0]
         
         # Get feature values
         feature_vals = X_row[self.feature_names].values[0]
@@ -85,10 +89,25 @@ class DemandExplainer:
             'is_weekend': 'Weekend',
             'day_of_week': 'Day of Week',
             'month': 'Month',
+            'quarter': 'Quarter',
+            'year': 'Year',
             'lag_7': '1-Week Lag',
+            'lag_14': '2-Week Lag',
             'lag_28': '4-Week Lag',
+            'lag_364': '52-Week Lag',
             'rolling_mean_7': '7-Day Average',
-            'rolling_mean_28': '28-Day Average'
+            'rolling_mean_14': '14-Day Average',
+            'rolling_mean_28': '28-Day Average',
+            'rolling_std_7': '7-Day Volatility',
+            'rolling_std_14': '14-Day Volatility',
+            'rolling_std_28': '28-Day Volatility',
+            'price_change': 'Price Change',
+            'price_change_pct': 'Price Change %',
+            'price_vs_avg': 'Price vs Average',
+            'price_lag_1': 'Yesterday Price',
+            'price_rolling_mean_7': '7-Day Avg Price',
+            'is_month_start': 'Month Start',
+            'is_month_end': 'Month End',
         }
         return name_map.get(feature, feature.replace('_', ' ').title())
     
@@ -103,7 +122,7 @@ class DemandExplainer:
             if feature == 'is_festival' and value == 1:
                 return f"Festival day {direction} demand by {impact_abs:.0f} units"
             elif feature == 'is_festival_week' and value == 1:
-                return f"Festival week {direction} demand by {impact_abs:.0f} units"
+                return f"Festival week (pre-stocking) {direction} demand by {impact_abs:.0f} units"
             elif feature == 'days_to_festival':
                 return f"{int(value)} days to festival {direction} demand by {impact_abs:.0f} units"
         
@@ -111,13 +130,41 @@ class DemandExplainer:
         if feature == 'is_weekend' and value == 1:
             return f"Weekend {direction} demand by {impact_abs:.0f} units"
         
+        # Price features
+        if 'price' in feature.lower():
+            if feature == 'price_change' and abs(value) > 0:
+                price_dir = "increase" if value > 0 else "decrease"
+                return f"Price {price_dir} (₹{abs(value):.0f}) {direction} demand by {impact_abs:.0f} units"
+            elif feature == 'price_vs_avg':
+                pct = (value - 1) * 100
+                price_pos = "above" if pct > 0 else "below"
+                return f"Price {abs(pct):.0f}% {price_pos} average {direction} demand by {impact_abs:.0f} units"
+            return f"{feature_display} {direction} demand by {impact_abs:.0f} units"
+        
         # Lag features
         if 'lag' in feature:
-            return f"Previous sales pattern {direction} demand by {impact_abs:.0f} units"
+            return f"Previous sales pattern (lag={feature.split('_')[-1]}d) {direction} demand by {impact_abs:.0f} units"
         
         # Rolling averages
-        if 'rolling' in feature:
-            return f"Recent trend {direction} demand by {impact_abs:.0f} units"
+        if 'rolling_mean' in feature:
+            window = feature.split('_')[-1]
+            return f"Recent {window}-day trend {direction} demand by {impact_abs:.0f} units"
+        
+        if 'rolling_std' in feature:
+            window = feature.split('_')[-1]
+            return f"Recent {window}-day volatility {direction} demand by {impact_abs:.0f} units"
+        
+        # Calendar features
+        if feature == 'month':
+            month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            month_name = month_names[int(value)] if 1 <= int(value) <= 12 else str(int(value))
+            return f"Month ({month_name}) {direction} demand by {impact_abs:.0f} units"
+        
+        if feature == 'day_of_week':
+            day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            day_name = day_names[int(value)] if 0 <= int(value) <= 6 else str(int(value))
+            return f"Day of week ({day_name}) {direction} demand by {impact_abs:.0f} units"
         
         # Default explanation
         return f"{feature_display} (value: {value:.2f}) {direction} demand by {impact_abs:.0f} units"

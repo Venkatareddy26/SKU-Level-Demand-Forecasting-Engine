@@ -4,18 +4,23 @@ import numpy as np
 from datetime import datetime, timedelta
 
 def generate_sample_data(
-    n_skus=10,
+    n_skus=20,
     start_date='2023-01-01',
     end_date='2024-12-31',
+    festival_calendar_path='data/festival_calendar.csv',
     output_path='data/sample_sales.csv'
 ):
     """
     Generate synthetic sales data with seasonal patterns and festival spikes.
     
+    Uses the actual festival_calendar.csv to ensure festival spikes align
+    with the feature engineering pipeline.
+    
     Args:
         n_skus: Number of SKUs to generate
         start_date: Start date for data
         end_date: End date for data
+        festival_calendar_path: Path to festival calendar CSV
         output_path: Output CSV path
     """
     print(f"Generating sample data for {n_skus} SKUs...")
@@ -23,16 +28,28 @@ def generate_sample_data(
     # Date range
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
     
-    # Festival dates (approximate)
-    festivals = {
-        '2023-10-24': 'Diwali',
-        '2023-10-15': 'Dussehra',
-        '2024-01-15': 'Pongal',
-        '2024-11-01': 'Diwali',
-        '2024-10-12': 'Dussehra'
-    }
+    # Load festival dates from the ACTUAL calendar (not hardcoded)
+    try:
+        festival_df = pd.read_csv(festival_calendar_path)
+        festival_df['date'] = pd.to_datetime(festival_df['date'])
+        festival_dates = set(festival_df['date'].dt.date)
+        
+        # Pre-festival dates (7 days before each festival)
+        pre_festival_dates = set()
+        for fd in festival_df['date']:
+            for d in range(1, 8):
+                pre_festival_dates.add((fd - timedelta(days=d)).date())
+        
+        print(f"  Loaded {len(festival_dates)} festival dates from calendar")
+    except FileNotFoundError:
+        print("  Warning: festival_calendar.csv not found, using empty calendar")
+        festival_dates = set()
+        pre_festival_dates = set()
     
     data = []
+    categories = ['Food', 'Beverage', 'Personal Care', 'Household']
+    
+    np.random.seed(42)  # Reproducibility
     
     for sku_id in range(1, n_skus + 1):
         sku_name = f"SKU_{sku_id:03d}"
@@ -40,12 +57,17 @@ def generate_sample_data(
         # Base demand (different for each SKU)
         base_demand = np.random.randint(50, 200)
         
-        # Category (affects seasonality)
-        category = np.random.choice(['Food', 'Beverage', 'Personal Care', 'Household'])
+        # Category (consistent per SKU)
+        category = categories[(sku_id - 1) % len(categories)]
+        
+        # Base price (consistent per SKU with minor variation)
+        base_price = np.random.uniform(50, 500)
         
         for date in dates:
-            # Base sales
-            sales = base_demand
+            # Base sales with small trend
+            day_num = (date - dates[0]).days
+            trend = 1 + 0.0001 * day_num  # Slight upward trend
+            sales = base_demand * trend
             
             # Weekly seasonality (weekend boost)
             if date.dayofweek >= 5:  # Saturday, Sunday
@@ -59,17 +81,13 @@ def generate_sample_data(
             if date.month in [10, 11, 12]:
                 sales *= 1.3
             
-            # Festival spike
-            date_str = date.strftime('%Y-%m-%d')
-            if date_str in festivals:
+            # Festival spike (from actual calendar)
+            if date.date() in festival_dates:
                 sales *= 2.5  # 150% increase during festivals
             
-            # Days before festival (pre-stocking)
-            for festival_date in festivals.keys():
-                festival_dt = datetime.strptime(festival_date, '%Y-%m-%d')
-                days_diff = (festival_dt - date).days
-                if 1 <= days_diff <= 7:
-                    sales *= 1.5
+            # Pre-festival stocking period
+            if date.date() in pre_festival_dates:
+                sales *= 1.5
             
             # Add random noise
             sales *= np.random.uniform(0.85, 1.15)
@@ -77,8 +95,8 @@ def generate_sample_data(
             # Ensure non-negative
             sales = max(0, int(sales))
             
-            # Price (with some variation)
-            price = np.random.uniform(50, 500)
+            # Price with slight daily variation
+            price = base_price * np.random.uniform(0.95, 1.05)
             
             data.append({
                 'id': sku_name,
@@ -102,7 +120,7 @@ def generate_sample_data(
     print(f"  Total rows: {len(df)}")
     print(f"  Avg daily sales per SKU: {df['sales'].mean():.1f}")
     print(f"\nCategories:")
-    print(df['category'].value_counts())
+    print(df.groupby('category')['id'].nunique().to_string())
     
     return df
 

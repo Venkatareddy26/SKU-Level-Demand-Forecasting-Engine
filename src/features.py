@@ -18,45 +18,51 @@ class FeatureEngineer:
         return df
     
     def create_rolling_features(self, df, target_col='sales', windows=[7, 14, 28]):
-        """Create rolling mean and std features."""
+        """Create rolling mean and std features.
+        
+        Uses .shift(1) to prevent look-ahead bias — the rolling window
+        is computed on data BEFORE the current row, never including it.
+        """
         df = df.copy()
         for window in windows:
             df[f'rolling_mean_{window}'] = df.groupby('id')[target_col].transform(
-                lambda x: x.rolling(window, min_periods=1).mean()
+                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
             )
             df[f'rolling_std_{window}'] = df.groupby('id')[target_col].transform(
-                lambda x: x.rolling(window, min_periods=1).std()
+                lambda x: x.shift(1).rolling(window, min_periods=1).std()
             )
         return df
     
     def add_festival_features(self, df, date_col='date'):
-        """Add festival flags and days-to-festival features."""
+        """Add festival flags and days-to-festival features.
+        
+        Vectorized implementation — O(n × k) where k = number of festival dates,
+        using numpy broadcasting instead of nested Python loops.
+        """
         df = df.copy()
         df[date_col] = pd.to_datetime(df[date_col])
         
-        # Initialize festival columns
-        df['is_festival'] = 0
-        df['days_to_festival'] = 999
-        df['festival_name'] = ''
+        # Mark exact festival dates via merge
+        festival_lookup = self.festival_df[['date', 'festival']].copy()
+        festival_lookup.columns = [date_col, 'festival_name']
+        df = df.merge(festival_lookup, on=date_col, how='left')
+        df['festival_name'] = df['festival_name'].fillna('')
+        df['is_festival'] = (df['festival_name'] != '').astype(int)
         
-        # Mark festival dates and nearby dates
-        for _, festival_row in self.festival_df.iterrows():
-            festival_date = festival_row['date']
-            festival_name = festival_row['festival']
-            
-            # Mark exact festival date
-            mask = df[date_col] == festival_date
-            df.loc[mask, 'is_festival'] = 1
-            df.loc[mask, 'festival_name'] = festival_name
-            
-            # Calculate days to next festival (within 30 days)
-            for idx, row in df.iterrows():
-                days_diff = (festival_date - row[date_col]).days
-                if 0 <= days_diff <= 30:
-                    if days_diff < df.loc[idx, 'days_to_festival']:
-                        df.loc[idx, 'days_to_festival'] = days_diff
+        # Vectorized days-to-festival calculation
+        festival_dates = self.festival_df['date'].values.astype('datetime64[D]')
+        row_dates = df[date_col].values.astype('datetime64[D]')
         
-        # Add festival week flag (7 days before festival)
+        # Compute days-to-next-festival for each row (within 30-day window)
+        days_to = np.full(len(df), 999, dtype=np.int32)
+        for fd in festival_dates:
+            diff = (fd - row_dates).astype('timedelta64[D]').astype(np.int32)
+            mask = (diff >= 0) & (diff <= 30) & (diff < days_to)
+            days_to[mask] = diff[mask]
+        
+        df['days_to_festival'] = days_to
+        
+        # Festival week flag (7 days before festival = pre-stocking period)
         df['is_festival_week'] = (df['days_to_festival'] <= 7).astype(int)
         
         return df
@@ -68,12 +74,36 @@ class FeatureEngineer:
         
         df['day_of_week'] = df[date_col].dt.dayofweek
         df['day_of_month'] = df[date_col].dt.day
-        df['week_of_year'] = df[date_col].dt.isocalendar().week
+        df['week_of_year'] = df[date_col].dt.isocalendar().week.astype(int)
         df['month'] = df[date_col].dt.month
         df['quarter'] = df[date_col].dt.quarter
         df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
         df['is_month_start'] = (df['day_of_month'] <= 7).astype(int)
         df['is_month_end'] = (df['day_of_month'] >= 24).astype(int)
+        df['year'] = df[date_col].dt.year
+        
+        return df
+    
+    def add_price_features(self, df, price_col='price'):
+        """Add price-related features if price column exists."""
+        df = df.copy()
+        if price_col not in df.columns:
+            return df
+        
+        # Price lag (previous day's price)
+        df['price_lag_1'] = df.groupby('id')[price_col].shift(1)
+        
+        # Price change (day-over-day)
+        df['price_change'] = df[price_col] - df['price_lag_1']
+        df['price_change_pct'] = df['price_change'] / df['price_lag_1'].replace(0, np.nan)
+        
+        # Rolling average price (7-day)
+        df['price_rolling_mean_7'] = df.groupby('id')[price_col].transform(
+            lambda x: x.shift(1).rolling(7, min_periods=1).mean()
+        )
+        
+        # Price relative to rolling mean (proxy for discount detection)
+        df['price_vs_avg'] = df[price_col] / df['price_rolling_mean_7'].replace(0, np.nan)
         
         return df
     
@@ -95,6 +125,9 @@ class FeatureEngineer:
         
         # Add rolling features
         df = self.create_rolling_features(df, target_col)
+        
+        # Add price features (if price column exists)
+        df = self.add_price_features(df)
         
         print(f"✓ Features created. Shape: {df.shape}")
         return df
