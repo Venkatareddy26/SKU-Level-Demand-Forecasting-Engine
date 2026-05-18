@@ -45,7 +45,7 @@ def load_m5_data(data_path="data/raw"):
     # Convert date
     sales_long['date'] = pd.to_datetime(sales_long['date'])
     
-    print(f"✓ Data loaded. Shape: {sales_long.shape}")
+    print(f"[OK] Data loaded. Shape: {sales_long.shape}")
     return sales_long
 
 
@@ -54,7 +54,7 @@ def load_sample_data(data_path="data/sample_sales.csv"):
     print("Loading sample sales data...")
     df = pd.read_csv(data_path)
     df['date'] = pd.to_datetime(df['date'])
-    print(f"✓ Sample data loaded. Shape: {df.shape}")
+    print(f"[OK] Sample data loaded. Shape: {df.shape}")
     return df
 
 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
         print("M5 dataset not found. Using sample data...")
         df = load_sample_data()
     else:
-        print("❌ No data found!")
+        print("[ERROR] No data found!")
         print("Run: python scripts/generate_sample_data.py")
         print("Or:  python scripts/download_data.py")
         sys.exit(1)
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     model, explainer, metrics = train_lightgbm_model(df)
     
     print("\n" + "="*50)
-    print("✓ TRAINING COMPLETE")
+    print("[OK] TRAINING COMPLETE")
     print("="*50)
     print(f"\nValidation RMSE: {metrics['RMSE']:.2f}")
     print(f"Validation MAPE: {metrics['MAPE']:.2f}%")

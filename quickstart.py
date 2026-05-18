@@ -13,10 +13,10 @@ def check_python_version():
     """Check if Python version is compatible."""
     version = sys.version_info
     if version.major < 3 or (version.major == 3 and version.minor < 8):
-        print("❌ Python 3.8+ required")
+        print("[ERROR] Python 3.8+ required")
         print(f"   Current version: {version.major}.{version.minor}.{version.micro}")
         return False
-    print(f"✓ Python {version.major}.{version.minor}.{version.micro}")
+    print(f"[OK] Python {version.major}.{version.minor}.{version.micro}")
     return True
 
 def install_dependencies():
@@ -25,10 +25,10 @@ def install_dependencies():
     
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-        print("\n✓ All dependencies installed")
+        print("\n[OK] All dependencies installed")
         return True
     except subprocess.CalledProcessError:
-        print("\n❌ Failed to install dependencies")
+        print("\n[ERROR] Failed to install dependencies")
         return False
 
 def generate_sample_data():
@@ -39,7 +39,7 @@ def generate_sample_data():
         subprocess.check_call([sys.executable, "scripts/generate_sample_data.py"])
         return True
     except subprocess.CalledProcessError:
-        print("\n❌ Failed to generate sample data")
+        print("\n[ERROR] Failed to generate sample data")
         return False
 
 def check_m5_data():
@@ -47,10 +47,10 @@ def check_m5_data():
     print_header("Checking M5 Dataset")
     
     if os.path.exists("data/raw/sales_train_validation.csv"):
-        print("✓ M5 dataset found")
+        print("[OK] M5 dataset found")
         return True
     else:
-        print("⚠ M5 dataset not found")
+        print("[WARN] M5 dataset not found")
         print("\nOptions:")
         print("1. Download using Kaggle API: python scripts/download_data.py")
         print("2. Manual download: https://www.kaggle.com/competitions/m5-forecasting-accuracy/data")
@@ -66,13 +66,13 @@ def train_model():
     if response.lower() == 'y':
         try:
             subprocess.check_call([sys.executable, "src/train.py"])
-            print("\n✓ Model trained successfully")
+            print("\n[OK] Model trained successfully")
             return True
         except subprocess.CalledProcessError:
-            print("\n❌ Model training failed")
+            print("\n[ERROR] Model training failed")
             return False
     else:
-        print("⚠ Skipping model training")
+        print("[WARN] Skipping model training")
         print("  You can train later with: python src/train.py")
         return False
 
@@ -87,9 +87,9 @@ def launch_dashboard():
     try:
         subprocess.check_call([sys.executable, "-m", "streamlit", "run", "app.py"])
     except KeyboardInterrupt:
-        print("\n\n✓ Dashboard stopped")
+        print("\n\n[OK] Dashboard stopped")
     except subprocess.CalledProcessError:
-        print("\n❌ Failed to launch dashboard")
+        print("\n[ERROR] Failed to launch dashboard")
 
 def main():
     """Main quickstart flow."""
@@ -113,21 +113,21 @@ def main():
     print_header("Model Training")
     print("The model can train on:")
     if has_m5_data:
-        print("  ✓ M5 dataset (42,840 SKUs — 2-3 hours)")
-    print("  ✓ Sample data (20 SKUs — ~5 minutes)")
+        print("  [OK] M5 dataset (42,840 SKUs -- 2-3 hours)")
+    print("  [OK] Sample data (20 SKUs -- ~5 minutes)")
     print()
     train_model()
     
     # Launch dashboard
     print_header("Setup Complete!")
-    print("✓ Dependencies installed")
-    print("✓ Sample data generated")
+    print("[OK] Dependencies installed")
+    print("[OK] Sample data generated")
     if has_m5_data:
-        print("✓ M5 dataset available")
+        print("[OK] M5 dataset available")
     if os.path.exists("models/lightgbm_model.pkl"):
-        print("✓ Model trained")
+        print("[OK] Model trained")
     else:
-        print("⚠ Model not yet trained (run: python src/train.py)")
+        print("[WARN] Model not yet trained (run: python src/train.py)")
     
     print("\nNext steps:")
     print("1. Launch dashboard: streamlit run app.py")

@@ -23,24 +23,24 @@ def download_m5_dataset():
             quiet=False
         )
         
-        print("\n✓ Download complete!")
+        print("\n[OK] Download complete!")
         print("Extracting files...")
         
         import zipfile
         with zipfile.ZipFile("data/raw/m5-forecasting-accuracy.zip", 'r') as zip_ref:
             zip_ref.extractall("data/raw")
         
-        print("✓ Extraction complete!")
+        print("[OK] Extraction complete!")
         print("\nDataset files:")
         for file in os.listdir("data/raw"):
             if file.endswith('.csv'):
                 print(f"  - {file}")
                 
     except ImportError:
-        print("\n❌ Kaggle package not installed. Run: pip install kaggle")
+        print("\n[ERROR] Kaggle package not installed. Run: pip install kaggle")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n[ERROR] Error: {e}")
         print("\nManual download:")
         print("1. Visit: https://www.kaggle.com/competitions/m5-forecasting-accuracy/data")
         print("2. Download all files to data/raw/")

@@ -219,6 +219,15 @@ uploaded_file = st.sidebar.file_uploader(
     help="Upload historical sales data with columns: id, date, sales"
 )
 
+# Load sample data button
+if os.path.exists("data/sample_sales.csv"):
+    if st.sidebar.button("Load Sample Data", help="Load built-in sample data (20 SKUs, 2 years)"):
+        st.session_state.data = pd.read_csv("data/sample_sales.csv")
+        st.session_state.data['date'] = pd.to_datetime(st.session_state.data['date'])
+        st.sidebar.success(f"[OK] Sample data loaded: {len(st.session_state.data)} rows")
+
+st.sidebar.markdown("---")
+
 forecast_weeks = st.sidebar.slider(
     "Forecast Horizon (weeks)",
     min_value=4,
@@ -235,16 +244,16 @@ if uploaded_file is not None:
     is_valid, message = validate_csv(df)
     
     if not is_valid:
-        st.sidebar.error(f"❌ {message}")
+        st.sidebar.error(f"[ERROR] {message}")
         st.stop()
     else:
         st.session_state.data = df
-        st.sidebar.success(f"✓ Data loaded: {len(df)} rows")
+        st.sidebar.success(f"[OK] Data loaded: {len(df)} rows")
         if message:
             st.sidebar.warning(message)
     
     # Display data info
-    with st.expander("📋 Data Preview"):
+    with st.expander("Data Preview"):
         st.dataframe(df.head(10))
         st.write(f"Shape: {df.shape}")
         df['date'] = pd.to_datetime(df['date'])

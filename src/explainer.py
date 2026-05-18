@@ -26,7 +26,7 @@ class DemandExplainer:
         self.explainer = shap.TreeExplainer(self.model.model)
         self.shap_values = self.explainer.shap_values(X_sample[self.feature_names])
         
-        print(f"✓ SHAP values computed for {len(X_sample)} samples")
+        print(f"[OK] SHAP values computed for {len(X_sample)} samples")
         return self.shap_values
     
     def get_top_drivers(self, X_row, top_n=3, baseline_prediction=None):

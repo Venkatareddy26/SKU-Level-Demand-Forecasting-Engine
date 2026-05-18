@@ -112,8 +112,8 @@ def generate_sample_data(
     # Save to CSV
     df.to_csv(output_path, index=False)
     
-    print(f"✓ Sample data generated: {len(df)} rows")
-    print(f"✓ Saved to: {output_path}")
+    print(f"[OK] Sample data generated: {len(df)} rows")
+    print(f"[OK] Saved to: {output_path}")
     print(f"\nData summary:")
     print(f"  SKUs: {n_skus}")
     print(f"  Date range: {df['date'].min()} to {df['date'].max()}")
@@ -133,5 +133,5 @@ if __name__ == "__main__":
         output_path='data/sample_sales.csv'
     )
     
-    print("\n✓ You can now use this data in the Streamlit dashboard!")
+    print("\n[OK] You can now use this data in the Streamlit dashboard!")
     print("  Upload: data/sample_sales.csv")

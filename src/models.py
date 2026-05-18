@@ -47,7 +47,7 @@ class LightGBMForecaster:
             callbacks=[lgb.early_stopping(stopping_rounds=50), lgb.log_evaluation(100)]
         )
         
-        print(f"✓ Training complete. Best iteration: {self.model.best_iteration}")
+        print(f"[OK] Training complete. Best iteration: {self.model.best_iteration}")
         return self
     
     def predict(self, X):
@@ -72,7 +72,7 @@ class LightGBMForecaster:
         """Save model to disk."""
         with open(path, 'wb') as f:
             pickle.dump({'model': self.model, 'feature_cols': self.feature_cols}, f)
-        print(f"✓ Model saved to {path}")
+        print(f"[OK] Model saved to {path}")
     
     def load(self, path):
         """Load model from disk."""
@@ -80,7 +80,7 @@ class LightGBMForecaster:
             data = pickle.load(f)
             self.model = data['model']
             self.feature_cols = data['feature_cols']
-        print(f"✓ Model loaded from {path}")
+        print(f"[OK] Model loaded from {path}")
         return self
 
 
@@ -162,7 +162,7 @@ class NeuralProphetForecaster:
             metrics = model.fit(cat_data, freq='D')
             
             self.models[category] = model
-            print(f"✓ Model trained for {category}")
+            print(f"[OK] Model trained for {category}")
         
         return self
     
@@ -183,7 +183,7 @@ class NeuralProphetForecaster:
             path = f"{path_prefix}_{category}.pkl"
             with open(path, 'wb') as f:
                 pickle.dump(model, f)
-        print(f"✓ Models saved with prefix {path_prefix}")
+        print(f"[OK] Models saved with prefix {path_prefix}")
     
     def load(self, path_prefix, categories):
         """Load models from disk."""
@@ -191,5 +191,5 @@ class NeuralProphetForecaster:
             path = f"{path_prefix}_{category}.pkl"
             with open(path, 'rb') as f:
                 self.models[category] = pickle.load(f)
-        print(f"✓ Models loaded from {path_prefix}")
+        print(f"[OK] Models loaded from {path_prefix}")
         return self

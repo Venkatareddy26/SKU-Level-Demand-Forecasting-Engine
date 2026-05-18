@@ -129,5 +129,5 @@ class FeatureEngineer:
         # Add price features (if price column exists)
         df = self.add_price_features(df)
         
-        print(f"✓ Features created. Shape: {df.shape}")
+        print(f"[OK] Features created. Shape: {df.shape}")
         return df
