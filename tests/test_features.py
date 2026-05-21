@@ -64,6 +64,22 @@ class TestFeatureEngineer(unittest.TestCase):
         
         # 2023 has festival dates in the calendar; check they're flagged
         self.assertTrue(df_festival['is_festival'].max() >= 0)
+
+    def test_festival_duplicate_dates_do_not_duplicate_rows(self):
+        """Festival calendar dates with multiple festivals must not expand sales rows."""
+        df = pd.DataFrame({
+            'id': ['SKU_001', 'SKU_001', 'SKU_001'],
+            'date': pd.to_datetime(['2025-01-13', '2025-01-14', '2025-01-15']),
+            'sales': [100, 120, 110],
+        })
+
+        df_festival = self.fe.add_festival_features(df, date_col='date')
+
+        self.assertEqual(len(df_festival), len(df))
+        festival_row = df_festival[df_festival['date'] == pd.Timestamp('2025-01-14')].iloc[0]
+        self.assertEqual(festival_row['is_festival'], 1)
+        self.assertIn('Pongal', festival_row['festival_name'])
+        self.assertIn('Makar Sankranti', festival_row['festival_name'])
     
     def test_festival_features_vectorized_performance(self):
         """Test that festival features work on larger data without hanging."""

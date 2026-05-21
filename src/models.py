@@ -34,9 +34,12 @@ class LightGBMForecaster:
         train_data = lgb.Dataset(X_train, label=y_train)
         valid_sets = [train_data]
         
+        callbacks = [lgb.log_evaluation(100)]
+
         if X_val is not None and y_val is not None:
             val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
             valid_sets.append(val_data)
+            callbacks.insert(0, lgb.early_stopping(stopping_rounds=50))
         
         # Train model
         self.model = lgb.train(
@@ -44,17 +47,19 @@ class LightGBMForecaster:
             train_data,
             num_boost_round=num_boost_round,
             valid_sets=valid_sets,
-            callbacks=[lgb.early_stopping(stopping_rounds=50), lgb.log_evaluation(100)]
+            callbacks=callbacks
         )
         
-        print(f"[OK] Training complete. Best iteration: {self.model.best_iteration}")
+        best_iteration = self.model.best_iteration or self.model.current_iteration()
+        print(f"[OK] Training complete. Best iteration: {best_iteration}")
         return self
     
     def predict(self, X):
         """Make predictions."""
         if self.model is None:
             raise ValueError("Model not trained. Call train() first.")
-        return self.model.predict(X[self.feature_cols], num_iteration=self.model.best_iteration)
+        num_iteration = self.model.best_iteration or self.model.current_iteration()
+        return self.model.predict(X[self.feature_cols], num_iteration=num_iteration)
     
     def get_feature_importance(self, top_n=20):
         """Get feature importance."""

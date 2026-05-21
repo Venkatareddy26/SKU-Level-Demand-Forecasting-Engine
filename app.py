@@ -15,6 +15,8 @@ from features import FeatureEngineer
 from models import LightGBMForecaster
 from explainer import DemandExplainer
 
+MIN_HISTORY_DAYS = 365
+
 # Page config
 st.set_page_config(
     page_title="SKU Demand Forecasting",
@@ -73,15 +75,22 @@ def validate_csv(df):
         except Exception:
             return False, "'sales' column must be numeric."
     
-    # Check for minimum data
-    if len(df) < 30:
-        return False, f"Need at least 30 rows of data, got {len(df)}."
+    # Check for minimum data. The default feature set includes lag_364, so a
+    # SKU needs at least one year of daily history before forecasting works.
+    if len(df) < MIN_HISTORY_DAYS:
+        return False, (
+            f"Need at least {MIN_HISTORY_DAYS} rows of data for the default "
+            f"lag-364 model, got {len(df)}."
+        )
     
     # Check per-SKU minimum
     sku_counts = df['id'].value_counts()
-    small_skus = sku_counts[sku_counts < 30]
+    small_skus = sku_counts[sku_counts < MIN_HISTORY_DAYS]
     if len(small_skus) > 0:
-        return True, f"Warning: {len(small_skus)} SKUs have <30 data points. Forecasts may be unreliable."
+        return True, (
+            f"Warning: {len(small_skus)} SKUs have fewer than {MIN_HISTORY_DAYS} "
+            "data points. Forecasts for those SKUs may be unavailable."
+        )
     
     return True, ""
 
@@ -261,8 +270,8 @@ if uploaded_file is not None:
         st.write(f"SKUs: {df['id'].nunique()}")
 
 # Main content
-if st.session_state.data is not None:
-    df = st.session_state.data
+if st.session_state.get('data') is not None:
+    df = st.session_state.get('data')
     
     # SKU selector
     if 'id' in df.columns:
@@ -291,7 +300,7 @@ if st.session_state.data is not None:
                             st.error("Model not found. Please train the model first: `python src/train.py`")
                         else:
                             # Feature engineering
-                            fe = FeatureEngineer()
+                            fe = FeatureEngineer(verbose=False)
                             feature_cols = model.feature_cols
                             
                             # Recursive forecasting
@@ -419,7 +428,7 @@ if st.session_state.data is not None:
                             st.error("Model not found. Train with: `python src/train.py`")
                         else:
                             # Feature engineering
-                            fe = FeatureEngineer()
+                            fe = FeatureEngineer(verbose=False)
                             sku_features = fe.build_features(sku_data, target_col='sales', date_col='date')
                             sku_features_clean = sku_features.dropna()
                             

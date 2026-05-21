@@ -41,6 +41,9 @@ class DemandExplainer:
         Returns:
             List of dicts with driver info
         """
+        if self.explainer is None:
+            self.explainer = shap.TreeExplainer(self.model.model)
+
         if isinstance(X_row, pd.Series):
             X_row = X_row.to_frame().T
         
@@ -121,9 +124,15 @@ class DemandExplainer:
         if 'festival' in feature.lower():
             if feature == 'is_festival' and value == 1:
                 return f"Festival day {direction} demand by {impact_abs:.0f} units"
+            elif feature == 'is_festival':
+                return f"No festival today {direction} demand by {impact_abs:.0f} units"
             elif feature == 'is_festival_week' and value == 1:
                 return f"Festival week (pre-stocking) {direction} demand by {impact_abs:.0f} units"
+            elif feature == 'is_festival_week':
+                return f"Outside festival week {direction} demand by {impact_abs:.0f} units"
             elif feature == 'days_to_festival':
+                if value >= 999:
+                    return f"No festival in next 30 days {direction} demand by {impact_abs:.0f} units"
                 return f"{int(value)} days to festival {direction} demand by {impact_abs:.0f} units"
         
         # Weekend effect

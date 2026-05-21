@@ -6,9 +6,16 @@ from datetime import datetime, timedelta
 class FeatureEngineer:
     """Build lag features, rolling stats, and festival flags."""
     
-    def __init__(self, festival_calendar_path="data/festival_calendar.csv"):
+    def __init__(self, festival_calendar_path="data/festival_calendar.csv", verbose=True):
+        self.verbose = verbose
         self.festival_df = pd.read_csv(festival_calendar_path)
         self.festival_df['date'] = pd.to_datetime(self.festival_df['date'])
+        self.festival_lookup = (
+            self.festival_df
+            .groupby('date', as_index=False)['festival']
+            .agg(lambda values: ', '.join(dict.fromkeys(values.astype(str))))
+        )
+        self.festival_dates = self.festival_lookup['date'].values.astype('datetime64[D]')
     
     def create_lag_features(self, df, target_col='sales', lags=[7, 14, 28, 364]):
         """Create lag features for time series."""
@@ -43,19 +50,18 @@ class FeatureEngineer:
         df[date_col] = pd.to_datetime(df[date_col])
         
         # Mark exact festival dates via merge
-        festival_lookup = self.festival_df[['date', 'festival']].copy()
+        festival_lookup = self.festival_lookup.copy()
         festival_lookup.columns = [date_col, 'festival_name']
         df = df.merge(festival_lookup, on=date_col, how='left')
         df['festival_name'] = df['festival_name'].fillna('')
         df['is_festival'] = (df['festival_name'] != '').astype(int)
         
         # Vectorized days-to-festival calculation
-        festival_dates = self.festival_df['date'].values.astype('datetime64[D]')
         row_dates = df[date_col].values.astype('datetime64[D]')
         
         # Compute days-to-next-festival for each row (within 30-day window)
         days_to = np.full(len(df), 999, dtype=np.int32)
-        for fd in festival_dates:
+        for fd in self.festival_dates:
             diff = (fd - row_dates).astype('timedelta64[D]').astype(np.int32)
             mask = (diff >= 0) & (diff <= 30) & (diff < days_to)
             days_to[mask] = diff[mask]
@@ -109,7 +115,8 @@ class FeatureEngineer:
     
     def build_features(self, df, target_col='sales', date_col='date'):
         """Build complete feature set."""
-        print("Building features...")
+        if self.verbose:
+            print("Building features...")
         
         # Sort by id and date
         df = df.sort_values(['id', date_col]).reset_index(drop=True)
@@ -129,5 +136,6 @@ class FeatureEngineer:
         # Add price features (if price column exists)
         df = self.add_price_features(df)
         
-        print(f"[OK] Features created. Shape: {df.shape}")
+        if self.verbose:
+            print(f"[OK] Features created. Shape: {df.shape}")
         return df

@@ -194,6 +194,13 @@ class TestDemandExplainer(unittest.TestCase):
         required_keys = {'feature', 'value', 'impact', 'direction', 'explanation'}
         for driver in drivers:
             self.assertEqual(set(driver.keys()), required_keys)
+
+    def test_get_top_drivers_initializes_explainer_if_needed(self):
+        """Test get_top_drivers() works before compute_shap_values() is called."""
+        drivers = self.explainer.get_top_drivers(self.X_test.iloc[0], top_n=3)
+
+        self.assertEqual(len(drivers), 3)
+        self.assertIsNotNone(self.explainer.explainer)
     
     def test_get_top_drivers_with_dataframe_input(self):
         """Test get_top_drivers() works with single-row DataFrame input."""
@@ -276,6 +283,13 @@ class TestDemandExplainer(unittest.TestCase):
                      "Days to festival explanation should contain 'festival' keyword")
         self.assertIn('5', explanation,
                      "Explanation should include the value")
+
+    def test_generate_explanation_for_no_upcoming_festival(self):
+        """Test sentinel days_to_festival values are explained clearly."""
+        explanation = self.explainer._generate_explanation('days_to_festival', 999, -20.0)
+
+        self.assertIn('No festival in next 30 days', explanation)
+        self.assertNotIn('999 days', explanation)
     
     def test_generate_explanation_direction_consistency(self):
         """Test _generate_explanation() uses correct direction based on impact sign."""
